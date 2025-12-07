@@ -1,185 +1,166 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
-import { URL } from "./constants";
-import RecentSearch from "./components/RecentSearch";
-import QuestionAnswer from "./components/QuestionAnswer";
+import Sidebar from "./components/Sidebar";
+import MessageBubble from "./components/MessageBubble";
+import InputArea from "./components/InputArea";
+import { getGroqResponse } from "./services/ai";
 
 function App() {
-  const [question, setQuestion] = useState("");
-  const [result, setResult] = useState([]);
-  const [recentHistory, setRecentHistory] = useState(
-    JSON.parse(localStorage.getItem("history"))
-  );
-  const [selectedHistory, setSelectedHistory] = useState("");
-  const scrollToAns = useRef();
-  const [loader, setLoader] = useState(false);
+  const [history, setHistory] = useState([]); // Current chat session
+  const [savedHistory, setSavedHistory] = useState([]); // List of past queries
+  const [loading, setLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const messagesEndRef = useRef(null);
 
-  const askQuestion = async () => {
-    if (!question && !selectedHistory) {
-      return false;
+  // Load saved history on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("history");
+    if (saved) {
+      setSavedHistory(JSON.parse(saved));
     }
-    if (question) {
-      if (localStorage.getItem("history")) {
-        let history = JSON.parse(localStorage.getItem("history"));
-        history = [question, ...history];
-        localStorage.setItem("history", JSON.stringify(history));
-        setRecentHistory(history);
-      } else {
-        localStorage.setItem("history", JSON.stringify([question]));
-        setRecentHistory([question]);
-      }
-    }
-    const payloadData = question ? question : selectedHistory;
+  }, []);
 
-    const payload = {
-      contents: [
-        {
-          parts: [{ text: payloadData }],
-        },
-      ],
-    };
-
-    setLoader(true);
-
-    let response = await fetch(URL, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-
-    response = await response.json();
-    let dataString = response.candidates[0].content.parts[0].text;
-    dataString = dataString.split("* ");
-    dataString = dataString.map((item) => item.trim());
-
-    // console.log(dataString)
-    setResult([
-      ...result,
-      { type: "q", text: question ? question : selectedHistory },
-      { type: "ans", text: dataString },
-    ]);
-    setQuestion("");
-
-    setTimeout(() => {
-      scrollToAns.current.scrollTop = scrollToAns.current.scrollHeight;
-    }, 500);
-    setLoader(false);
+  // Update localStorage when history changes (simplified: just storing queries for now as per old app behavior)
+  // Or better, we can store full conversations if we want, but sticking to old behavior (list of queries) for the sidebar
+  const updateSavedHistory = (query) => {
+    const newHistory = [query, ...savedHistory];
+    setSavedHistory(newHistory);
+    localStorage.setItem("history", JSON.stringify(newHistory));
   };
 
-  // console.log(recentHistory);
-  
-  const isEnter = (event) => {
-    //  console.log(event.key);
-
-    if (event.key == "Enter") {
-      askQuestion();
-    }
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-    console.log(selectedHistory);
-    
-    askQuestion();
-  }, [selectedHistory]);
+    scrollToBottom();
+  }, [history, loading]);
 
-  // Dark Mode Feature
-  const [darkMode,setDarkMode] = useState('dark')
-  useEffect(()=>{
-   if(darkMode=='dark'){
-    document.documentElement.classList.add('dark')
-   }else{
-    document.documentElement.classList.remove('dark')
-   }
-  },[darkMode])
+  const handleSendMessage = async (message) => {
+    // Add user message
+    const newHistory = [...history, { role: "user", content: message }];
+    setHistory(newHistory);
+    setLoading(true);
+    
+    // Update sidebar history
+    updateSavedHistory(message);
+
+    // Get AI response
+    try {
+      const response = await getGroqResponse(message, history.map(h => h.content));
+      setHistory(prev => [...prev, { role: "assistant", content: response }]);
+    } catch (error) {
+      setHistory(prev => [...prev, { role: "assistant", content: "Sorry, something went wrong. Please try again." }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleHistorySelect = (query) => {
+    // When selecting history, we could either load that conversation or just put it in input
+    // For this app's pattern, it seems to "ask" the question again or show the result.
+    // Let's treat it as asking again for simplicity, or just starting a fresh chat with that context.
+    // Let's clear current view and ask it.
+    setHistory([]);
+    handleSendMessage(query);
+  };
+
+  // Check system dark mode preference
+  useEffect(() => {
+    // Default to dark mode unless user has explicitly stored 'light' preference (if we had storage)
+    // For now, just force dark mode on mount as default
+    document.documentElement.classList.add('dark');
+  }, []);
+
+
+  const toggleDarkMode = () => {
+    document.documentElement.classList.toggle('dark');
+  };
 
   return (
-    
-     <div className={darkMode=='dark'?'dark':'light'}>
-      <div className="grid grid-cols-5 h-screen text-center ">
+    <div className="flex h-screen bg-gray-50 dark:bg-zinc-950 overflow-hidden font-display transition-colors duration-300">
+      
+      {/* Sidebar */}
+      <Sidebar 
+        recentHistory={savedHistory} 
+        setRecentHistory={setSavedHistory}
+        setSelectedHistory={handleHistorySelect}
+        isOpen={sidebarOpen}
+        toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+      />
 
-        <select onChange={(event)=>setDarkMode(event.target.value)} className="fixed dark:text-white text-black bottom-0 p-5">
-
-           <option  value={"dark"} >Dark</option>
-           <option  value={"light"} >Light</option>
-           
-        </select>
-        <RecentSearch  recentHistory={recentHistory} setRecentHistory={setRecentHistory} setSelectedHistory={setSelectedHistory} />
-
-
-        {/* main home view center */}
-
-        <div className="col-span-4 p-10 bg-white dark:bg-zinc-800 ">
-          <h1 className="text-4xl bg-clip-text text-transparent bg-linear-to-r from-pink-500 to-violet-600">
-            Hello User! Ask Me Anything
-          </h1>
-          {loader ? (
-            <div role="status">
-              <svg
-                aria-hidden="true"
-                className="inline w-8 h-8 text-purple-300 animate-spin fill-purple-800"
-                viewBox="0 0 100 101"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 
-           0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 
-           0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 
-           73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 
-           90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 
-           72.5987 9.67226 50 9.67226C27.4013 9.67226 
-           9.08144 27.9921 9.08144 50.5908Z"
-                  fill="currentColor"
-                />
-
-                <path
-                  d="M93.9676 39.0409C96.393 38.4038 
-           97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 
-           92.871 24.3692 89.8167 20.348C85.8452 15.1192 
-           80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 
-           63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 
-           46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 
-           37.813 4.19778 38.4501 6.62326C39.0873 9.04874 
-           41.5694 10.4717 44.0505 10.1071C47.8511 
-           9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 
-           10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 
-           17.9648 79.3347 21.5619 82.5849 25.841C84.9175 
-           28.9121 86.7997 32.2913 88.1811 35.8758C89.083 
-           38.2158 91.5421 39.6781 93.9676 39.0409Z"
-                  fill="currentFill"
-                />
-              </svg>
-              <span className="sr-only">Loading...</span>
-            </div>
-          ) : null}
-          <div ref={scrollToAns} className="container h-150 overflow-scroll ">
-            <div className="text-zinc-900">
-              <ul>
-                {result.map((item, index) => (
-                 <QuestionAnswer key={index} item={item} index={index} />
-                ))}
-              </ul>
-            </div>
-          </div>
-          <div
-            className="bg-zinc-200 dark:bg-zinc-800 w-1/2 text-zinc-900 dark:text-zinc-200 m-auto rounded-4xl
-          border border-zinc-900 dark:border-zinc-200 flex h-16 "
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col relative w-full h-full max-w-full">
+        
+        {/* Top Navigation / Mobile Toggle */}
+        <header className="p-4 flex items-center justify-between z-10">
+          <button 
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 md:hidden text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg"
           >
-            <input
-              className="w-full h-full p-3 outline-none"
-              text="text "
-              value={question}
-              onKeyDown={isEnter}
-              onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ask Me Anything"
-            ></input>
-            <button onClick={askQuestion} className="pr-5 ">
-              Ask
-            </button>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+          </button>
+
+          <div className="ml-auto flex gap-2">
+             <button 
+                onClick={toggleDarkMode}
+                className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 transition-colors"
+                title="Toggle Theme"
+             >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+                </svg>
+             </button>
+          </div>
+        </header>
+
+        {/* Chat Area */}
+        <div className="flex-1 overflow-y-auto px-4 md:px-8 pb-32 scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700">
+          <div className="max-w-4xl mx-auto pt-10">
+            {history.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[50vh] text-center space-y-4 animate-fade-in">
+                <div className="w-20 h-20 bg-gradient-to-tr from-violet-600 to-indigo-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-violet-500/30 mb-4 rotate-12 transition-transform hover:rotate-0 duration-300">
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="white" className="w-10 h-10">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
+                    </svg>
+                </div>
+                <h1 className="text-4xl font-bold text-zinc-800 dark:text-white">
+                  How can I help you today?
+                </h1>
+                <p className="text-zinc-500 dark:text-zinc-400 max-w-md">
+                   I'm your advanced AI assistant. Ask me anything about code, writing, or general knowledge.
+                </p>
+              </div>
+            ) : (
+              history.map((msg, index) => (
+                <div key={index} className="animate-slide-up">
+                  <MessageBubble message={msg} />
+                </div>
+              ))
+            )}
+            
+            {loading && (
+              <div className="flex justify-start mb-6 animate-pulse">
+                <div className="bg-white dark:bg-zinc-800 rounded-2xl rounded-bl-none p-4 shadow-sm flex items-center gap-2">
+                  <div className="w-2 h-2 bg-violet-500 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
+                  <div className="w-2 h-2 bg-violet-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  <div className="w-2 h-2 bg-violet-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
           </div>
         </div>
+
+        {/* Input Area (Fixed at bottom) */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-transparent dark:from-zinc-950 dark:via-zinc-950 dark:to-transparent z-10 pb-6 md:pb-8">
+          <InputArea onSendMessage={handleSendMessage} disabled={loading} />
+        </div>
+
       </div>
-      </div>
-    
+    </div>
   );
 }
 
