@@ -23,7 +23,10 @@ function App() {
   // Update localStorage when history changes (simplified: just storing queries for now as per old app behavior)
   // Or better, we can store full conversations if we want, but sticking to old behavior (list of queries) for the sidebar
   const updateSavedHistory = (query) => {
-    const newHistory = [query, ...savedHistory];
+    // Remove if already exists to prevent duplicates (Move to Top behavior)
+    const filteredHistory = savedHistory.filter(item => item !== query);
+    const newHistory = [query, ...filteredHistory];
+    
     setSavedHistory(newHistory);
     localStorage.setItem("history", JSON.stringify(newHistory));
   };
