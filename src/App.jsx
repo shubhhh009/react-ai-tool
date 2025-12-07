@@ -50,7 +50,8 @@ function App() {
       const response = await getGroqResponse(message, history.map(h => h.content));
       setHistory(prev => [...prev, { role: "assistant", content: response }]);
     } catch (error) {
-      setHistory(prev => [...prev, { role: "assistant", content: "Sorry, something went wrong. Please try again." }]);
+      console.error(error);
+      setHistory(prev => [...prev, { role: "assistant", content: `Error: ${error.message}` }]);
     } finally {
       setLoading(false);
     }
